@@ -13,6 +13,7 @@
 
 import { ComputerUse } from './computer-use.mjs';
 import { execSync } from 'child_process';
+import { writeFileSync } from 'node:fs';
 
 // ─── Clipboard ───────────────────────────────────────────────────────
 function setClipboard(text) {
@@ -306,8 +307,7 @@ export async function sendChatFile(app, contact, filePath) {
           "$f.Add(\"" + filePath + "\")",
           "[System.Windows.Forms.Clipboard]::SetFileDropList($f)"
         ].join("\n");
-        const fs = await import("node:fs");
-        fs.writeFileSync(ps1Path, ps1Content, "utf8");
+        writeFileSync(ps1Path, ps1Content, "utf8");
 
         // Execute PS1 to set clipboard
         execSync("powershell -File \"" + ps1Path + "\"", { encoding: "utf8", stdio: "pipe" });
@@ -328,26 +328,26 @@ export async function sendChatFile(app, contact, filePath) {
 
         // Click send in confirmation dialog
         await cu.getWindowState(targetWin, { text: true });
-        for (const line of (await cu.getWindowState(targetWin, { text: true })).accessibility.tree.split("\n")) {
-          if (line.includes("发送") && line.includes("按钮")) {
-            const m = line.match(/^\s*(\d+)\s/);
-            if (m) { await cu.click(targetWin, { element_index: parseInt(m[1]) }); break; }
-          }
-        }
-        // Fallback: press Enter or click by coordinates
-        await cu.pressKey(targetWin, "Return");
-        await sleep(1000);
-        // If still showing dialog, click the blue button by coordinates
-        try {
-          await cu.getWindowState(targetWin, { text: true });
-          for (const line of (await cu.getWindowState(targetWin, { text: true })).accessibility.tree.split("\n")) {
+        let dialogClosed = false;
+        for (let attempt = 0; attempt < 3 && !dialogClosed; attempt++) {
+          const st = await cu.getWindowState(targetWin, { text: true });
+          const tree = st.accessibility?.tree || "";
+          let clicked = false;
+          for (const line of tree.split("\n")) {
             if (line.includes("发送") && line.includes("按钮")) {
-              await cu.click(targetWin, { x: 540, y: 545 });
-              break;
+              const m = line.match(/^\s*(\d+)\s/);
+              if (m) { await cu.click(targetWin, { element_index: parseInt(m[1]) }); clicked = true; break; }
             }
           }
-        } catch {}
-        await sleep(1000);
+          if (!clicked) await cu.click(targetWin, { x: 540, y: 545 });
+          await sleep(1500);
+          // Check if dialog closed (no more 发送 button)
+          try {
+            const check = await cu.getWindowState(targetWin, { text: true });
+            if (!(check.accessibility?.tree || "").includes("发送")) dialogClosed = true;
+          } catch { dialogClosed = true; }
+        }
+        await sleep(500);
 
         console.log("File sent to " + contact + " on " + app + ": " + filePath);
         return true;

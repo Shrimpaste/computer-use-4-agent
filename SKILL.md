@@ -123,6 +123,8 @@ await sendChatFile('WeChat', 'contact', 'C:\\file.pdf');
 - Browser windows blocked by URL policy. Non-browser apps always work.
 - Fullscreen apps block screenshots. Minimize with `key Escape` first.
 - WeChat coordinates assume 1920x1080 base, auto-scaled for DPI.
+- QQ file sending uses clipboard paste (PS1 script) — not file dialog.
+- `typeText` with backslashes auto-switches to clipboard paste mode.
 
 ## General Desktop Automation
 
