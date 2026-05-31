@@ -280,7 +280,82 @@ export function listSupportedApps() {
 export async function sendChatFile(app, contact, filePath) {
   const profile = PROFILES[app];
   if (!profile) throw new Error("Unsupported: " + app);
-  if (!profile.clickFileIcon) throw new Error(app + " file sending not supported");
+
+  // QQ file sending uses clipboard paste (avoids file dialog issues)
+  if (app === "QQ") {
+    return retry(async () => {
+      const cu = await ComputerUse.session();
+      try {
+        const wins = await cu.listWindows();
+        const mainWin = wins.find(profile.matchWindow);
+        if (!mainWin) throw new Error("QQ window not found");
+        await cu.activateWindow(mainWin);
+        await profile.openChat(cu, mainWin, contact);
+
+        const wins2 = await cu.listWindows();
+        const chatWin = wins2.find(w => w.title?.includes(contact) || (w.title === mainWin.title && w.app === mainWin.app));
+        const targetWin = chatWin || mainWin;
+        await cu.activateWindow(targetWin);
+        await cu.getWindowState(targetWin, { text: true });
+
+        // Write PS1 script to copy file to clipboard
+        const ps1Path = process.env.TEMP + "\\cu-copy-file.ps1";
+        const ps1Content = [
+          "Add-Type -AssemblyName System.Windows.Forms",
+          "$f = New-Object System.Collections.Specialized.StringCollection",
+          "$f.Add(\"" + filePath + "\")",
+          "[System.Windows.Forms.Clipboard]::SetFileDropList($f)"
+        ].join("\n");
+        const fs = await import("node:fs");
+        fs.writeFileSync(ps1Path, ps1Content, "utf8");
+
+        // Execute PS1 to set clipboard
+        execSync("powershell -File \"" + ps1Path + "\"", { encoding: "utf8", stdio: "pipe" });
+
+        // Focus chat input
+        for (const line of (await cu.getWindowState(targetWin, { text: true })).accessibility.tree.split("\n")) {
+          if (line.includes("工具栏") && line.includes("会话")) {
+            const m = line.match(/^\s*(\d+)\s/);
+            if (m) { await cu.click(targetWin, { element_index: parseInt(m[1]) }); break; }
+          }
+        }
+        await cu.pressKey(targetWin, "Down");
+        await sleep(300);
+
+        // Paste file
+        await cu.pressKey(targetWin, "Control_L+v");
+        await sleep(2000);
+
+        // Click send in confirmation dialog
+        await cu.getWindowState(targetWin, { text: true });
+        for (const line of (await cu.getWindowState(targetWin, { text: true })).accessibility.tree.split("\n")) {
+          if (line.includes("发送") && line.includes("按钮")) {
+            const m = line.match(/^\s*(\d+)\s/);
+            if (m) { await cu.click(targetWin, { element_index: parseInt(m[1]) }); break; }
+          }
+        }
+        // Fallback: press Enter or click by coordinates
+        await cu.pressKey(targetWin, "Return");
+        await sleep(1000);
+        // If still showing dialog, click the blue button by coordinates
+        try {
+          await cu.getWindowState(targetWin, { text: true });
+          for (const line of (await cu.getWindowState(targetWin, { text: true })).accessibility.tree.split("\n")) {
+            if (line.includes("发送") && line.includes("按钮")) {
+              await cu.click(targetWin, { x: 540, y: 545 });
+              break;
+            }
+          }
+        } catch {}
+        await sleep(1000);
+
+        console.log("File sent to " + contact + " on " + app + ": " + filePath);
+        return true;
+      } finally { await cu.close(); }
+    });
+  }
+
+  // WeChat and others: use file dialog approach (existing)
   return retry(async () => {
     const cu = await ComputerUse.session();
     try {
@@ -289,11 +364,13 @@ export async function sendChatFile(app, contact, filePath) {
       if (!mainWin) throw new Error(app + " window not found");
       await cu.activateWindow(mainWin);
       await profile.openChat(cu, mainWin, contact);
+
       const wins2 = await cu.listWindows();
       const chatWin = wins2.find(w => w.title?.includes(contact) || (w.title === mainWin.title && w.app === mainWin.app));
       const targetWin = chatWin || mainWin;
       await cu.activateWindow(targetWin);
       await cu.getWindowState(targetWin, { text: true });
+
       await profile.clickFileIcon(cu, targetWin);
       await sleep(2000);
       await cu.typeText(targetWin, filePath);
@@ -303,6 +380,7 @@ export async function sendChatFile(app, contact, filePath) {
       await cu.getWindowState(targetWin, { text: true });
       await profile.clickSend(cu, targetWin);
       await sleep(1000);
+
       console.log("File sent to " + contact + " on " + app + ": " + filePath);
       return true;
     } finally { await cu.close(); }
