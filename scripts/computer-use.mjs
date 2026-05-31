@@ -911,9 +911,7 @@ export default CU;
 
 const isMain = process.argv[1] && (
   process.argv[1].endsWith('computer-use.mjs') ||
-  process.argv[1].endsWith('computer-use.js') ||
-  process.argv[1].endsWith('cu.mjs') ||
-  process.argv[1].endsWith('cu.js')
+  process.argv[1].endsWith('computer-use.js')
 );
 
 if (isMain) {
