@@ -50,6 +50,7 @@ import { readFileSync, readdirSync, writeFileSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createConnection } from 'node:net';
+import { execSync } from 'node:child_process';
 import { Buffer } from 'node:buffer';
 import { endianness } from 'node:os';
 
@@ -339,9 +340,35 @@ export class ComputerUse {
     return this.request('press_key', { window: toWire(window), key: normalizeKey(key) });
   }
 
-  /** Type text into the focused element of a window. */
+  /** Type text into the focused element of a window.
+   *  Uses clipboard paste for text containing backslashes to avoid IME issues. */
   async typeText(window, text) {
-    return this.request('type_text', { window: toWire(window), text: String(text) });
+    const s = String(text);
+    if (!s.includes('\\')) {
+      return this.request('type_text', { window: toWire(window), text: s });
+    }
+    // Clipboard approach: set clipboard → Ctrl+V → restore clipboard
+    const wire = toWire(window);
+
+    // Save current clipboard
+    let oldClip = '';
+    try { oldClip = execSync('powershell -Command "Get-Clipboard"', { encoding: 'utf8' }).trim(); } catch {}
+
+    // Set clipboard with our text
+    const safe = s.replace(/"/g, '""');
+    const encoded = Buffer.from(`Set-Clipboard -Value "${safe}"`, 'utf16le').toString('base64');
+    execSync(`powershell -EncodedCommand ${encoded}`, { encoding: 'utf8', stdio: 'pipe' });
+
+    // Paste
+    await this.request('press_key', { window: wire, key: 'Control_L+v' });
+    await new Promise(r => setTimeout(r, 200));
+
+    // Restore old clipboard
+    try {
+      const restoreSafe = oldClip.replace(/"/g, '""');
+      const restoreEncoded = Buffer.from(`Set-Clipboard -Value "${restoreSafe}"`, 'utf16le').toString('base64');
+      execSync(`powershell -EncodedCommand ${restoreEncoded}`, { encoding: 'utf8', stdio: 'pipe' });
+    } catch {}
   }
 
   /** Scroll in a window at the given coordinates. */
