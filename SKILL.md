@@ -9,18 +9,23 @@ Automate any Windows application through UI Automation, SendInput, and window sc
 
 ## Prerequisites
 
-Helper process must be running:
+- Windows 10/11
+- Node.js >= 18
+
+Helper process must be running. **Two installation modes:**
+
+### With Codex installed
 
 ```powershell
 Get-Process codex-computer-use -ErrorAction SilentlyContinue
-```
-
-If not running:
-
-```powershell
+# If not running:
 $exe = Get-ChildItem "$env:USERPROFILE\.codex\plugins\cache\openai-bundled\computer-use\*\node_modules\@oai\sky\bin\windows\codex-computer-use.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
 if ($exe) { Start-Process $exe.FullName -WindowStyle Hidden }
 ```
+
+### Without Codex (standalone)
+
+The `bin/codex-computer-use.exe` is bundled in this repo. It auto-starts when `ComputerUse.session()` is called. No Codex installation needed.
 
 ## Quick Reference
 

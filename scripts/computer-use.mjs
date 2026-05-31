@@ -240,13 +240,34 @@ export class ComputerUse {
       if (match) return `\\\\.\\pipe\\${match}`;
     } catch {}
 
+    // 4. Try to auto-start from bundled bin/
+    try {
+      const binDir = join(dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Z]:)/, '$1')), '..', 'bin');
+      const exePath = join(binDir, 'codex-computer-use.exe');
+      statSync(exePath);
+      const { spawnSync } = require('node:child_process');
+      spawnSync(exePath, { detached: true, stdio: 'ignore', windowsHide: true }).unref();
+      // Synchronous wait for pipe to appear (up to 5s)
+      const start = Date.now();
+      while (Date.now() - start < 5000) {
+        try {
+          const entries2 = readdirSync('\\\\?\\pipe\\');
+          const match2 = entries2.find(e => e.startsWith('the computer-use helper-'));
+          if (match2) return `\\\\.\\pipe\\${match2}`;
+        } catch {}
+        // Busy-wait 100ms
+        constSyncWait(100);
+      }
+    } catch {}
+
     throw new Error(
       'Cannot discover Computer Use pipe path.\n' +
       'Ensure the computer-use helper is running.\n' +
       'Options:\n' +
       '  1. Set SKY_CUA_NATIVE_PIPE_DIRECTORY env var\n' +
       '  2. Set SKY_CUA_NATIVE_PIPE_DIRECTORY in ~/.codex/config.toml\n' +
-      '  3. Ensure the pipe exists in \\\\?\\pipe\\'
+      '  3. Ensure the pipe exists in \\\\?\\pipe\\\n' +
+      '  4. Place codex-computer-use.exe in <skill-root>/bin/'
     );
   }
 
@@ -790,6 +811,7 @@ function toPositiveInt(v, name) {
 }
 function opt(obj, key, val) { if (val !== undefined) obj[key] = val; }
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+function constSyncWait(ms) { const end = Date.now() + ms; while (Date.now() < end) {} }
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // §5  WAIT & DIALOG PRIMITIVES
