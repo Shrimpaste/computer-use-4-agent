@@ -191,3 +191,40 @@ export async function getTree(query) {
     await cu.close();
   }
 }
+
+/**
+ * Wait until a condition is met on a window.
+ * @param {string} query - Window title or app name
+ * @param {function} conditionFn - Receives WindowState, returns boolean
+ * @param {object} [options] - { timeout, interval, description }
+ * @returns {Promise<object>} WindowState that satisfied the condition
+ */
+export async function waitForWindow(query, conditionFn, options = {}) {
+  const cu = await ComputerUse.session();
+  try {
+    const wins = await cu.listWindows();
+    const win = ComputerUse.findWindow(wins, query);
+    if (!win) throw new Error(`Window matching "${query}" not found`);
+    return await cu.waitUntil(win, conditionFn, options);
+  } finally {
+    await cu.close();
+  }
+}
+
+/**
+ * Detect a dialog in a window by matching rules.
+ * @param {string} query - Window title or app name
+ * @param {Array} rules - Dialog detection rules
+ * @returns {Promise<object|null>} Match result or null
+ */
+export async function detectDialogInWindow(query, rules) {
+  const cu = await ComputerUse.session();
+  try {
+    const wins = await cu.listWindows();
+    const win = ComputerUse.findWindow(wins, query);
+    if (!win) throw new Error(`Window matching "${query}" not found`);
+    return await cu.detectDialog(win, rules);
+  } finally {
+    await cu.close();
+  }
+}

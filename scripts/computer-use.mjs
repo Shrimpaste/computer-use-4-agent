@@ -477,6 +477,182 @@ export class ComputerUse {
     await cu.connect(pipePath);
     return cu;
   }
+
+  /**
+   * Poll window state until conditionFn returns true or timeout expires.
+   * @param {object} window - Window handle
+   * @param {function} conditionFn - Receives WindowState, returns boolean
+   * @param {object} [options] - { timeout, interval, description, includeScreenshot, signal }
+   * @returns {Promise<WindowState>} The state that satisfied the condition
+   */
+  async waitUntil(window, conditionFn, options = {}) {
+    const {
+      timeout = 30_000,
+      interval = 1_000,
+      description = '',
+      includeScreenshot = false,
+      signal,
+    } = options;
+
+    if (typeof conditionFn !== 'function') {
+      throw new TypeError('conditionFn must be a function');
+    }
+
+    const deadline = Date.now() + timeout;
+
+    if (signal?.aborted) {
+      throw new DOMException('waitUntil aborted', 'AbortError');
+    }
+
+    let onAbort;
+    const abortPromise = signal
+      ? new Promise((_, reject) => {
+          onAbort = () => reject(new DOMException('waitUntil aborted', 'AbortError'));
+          signal.addEventListener('abort', onAbort, { once: true });
+        })
+      : null;
+
+    try {
+      while (true) {
+        const remaining = deadline - Date.now();
+        if (remaining <= 0) {
+          const label = description ? ` waiting for "${description}"` : '';
+          throw new TimeoutError(`waitUntil timed out after ${timeout}ms${label}`, timeout);
+        }
+
+        let state;
+        try {
+          state = await this.getWindowState(window, {
+            screenshot: includeScreenshot,
+            text: true,
+          });
+        } catch (err) {
+          if (err.message?.includes('not found') || err.message?.includes('closed')) {
+            throw new Error(`waitUntil: window disappeared${description ? ` while waiting for "${description}"` : ''}: ${err.message}`);
+          }
+          throw err;
+        }
+
+        const result = await conditionFn(state);
+        if (result === true) return state;
+
+        if (abortPromise) {
+          await Promise.race([sleep(Math.min(interval, remaining)), abortPromise]);
+        } else {
+          await sleep(Math.min(interval, remaining));
+        }
+      }
+    } finally {
+      if (signal && onAbort) {
+        signal.removeEventListener('abort', onAbort);
+      }
+    }
+  }
+
+  /**
+   * Detect a dialog by matching rules against accessibility tree.
+   * Pure detection — does NOT perform actions.
+   * @param {object} window - Window handle
+   * @param {Array} rules - [{ id, match: { title, content, custom }, action: { type, label, key } }]
+   * @returns {Promise<{ rule, elementIndex, state } | null>}
+   */
+  async detectDialog(window, rules) {
+    if (!Array.isArray(rules) || rules.length === 0) {
+      throw new TypeError('rules must be a non-empty array');
+    }
+
+    const state = await this.getWindowState(window, { screenshot: false, text: true });
+    const tree = state.accessibility?.tree || '';
+    const docText = state.accessibility?.document_text || '';
+    const title = state.window?.title || '';
+
+    for (const rule of rules) {
+      const { match, action } = rule;
+      let matched = false;
+      let elementIndex = null;
+
+      if (match.title != null) matched = matchString(title, match.title);
+      if (!matched && match.content != null) {
+        matched = matchString(tree, match.content) || matchString(docText, match.content);
+      }
+      if (!matched && typeof match.custom === 'function') {
+        matched = await match.custom(state);
+      }
+
+      if (!matched) continue;
+
+      if (action?.type === 'click' && action.label && action.elementIndex == null) {
+        elementIndex = findElementByLabel(tree, action.label);
+      } else if (action?.elementIndex != null) {
+        elementIndex = action.elementIndex;
+      }
+
+      if (action?.type === 'click' && elementIndex == null && action.label) continue;
+
+      return { rule, elementIndex, state };
+    }
+    return null;
+  }
+
+  /**
+   * Wait for a dialog to appear, then optionally execute its action.
+   * Combines waitUntil polling with detectDialog rule matching.
+   * @param {object} window - Window handle
+   * @param {Array} rules - Dialog detection rules
+   * @param {object} [options] - { timeout, interval, executeAction, description }
+   * @returns {Promise<{ rule, elementIndex, state }>}
+   */
+  async waitUntilWithDialog(window, rules, options = {}) {
+    const { timeout = 30_000, interval = 1_000, executeAction = true, description = 'dialog' } = options;
+
+    await this.waitUntil(window, async (state) => {
+      const tree = state.accessibility?.tree || '';
+      const docText = state.accessibility?.document_text || '';
+      const winTitle = state.window?.title || '';
+
+      for (const rule of rules) {
+        const { match } = rule;
+        let matched = false;
+        if (match.title != null) matched = matchString(winTitle, match.title);
+        if (!matched && match.content != null) {
+          matched = matchString(tree, match.content) || matchString(docText, match.content);
+        }
+        if (!matched && typeof match.custom === 'function') {
+          matched = await match.custom(state);
+        }
+        if (matched) return true;
+      }
+      return false;
+    }, { timeout, interval, description });
+
+    const match = await this.detectDialog(window, rules);
+    if (!match) {
+      throw new Error(`waitUntilWithDialog: dialog appeared then disappeared`);
+    }
+
+    if (executeAction && match.rule.action) {
+      const { action } = match.rule;
+      switch (action.type) {
+        case 'click':
+          if (match.elementIndex != null) {
+            await this.click(window, { element_index: match.elementIndex });
+          } else if (action.elementIndex != null) {
+            await this.click(window, { element_index: action.elementIndex });
+          } else {
+            throw new Error(`Dialog rule "${match.rule.id}": no element found to click`);
+          }
+          break;
+        case 'press':
+          await this.pressKey(window, action.key || 'Return');
+          break;
+        case 'report':
+        case 'ignore':
+          break;
+      }
+    }
+
+    return match;
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -586,9 +762,66 @@ function toPositiveInt(v, name) {
   return n;
 }
 function opt(obj, key, val) { if (val !== undefined) obj[key] = val; }
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// §5  DEFAULT EXPORT (backward-compatible with cu.mjs)
+// §5  WAIT & DIALOG PRIMITIVES
+// ═══════════════════════════════════════════════════════════════════════════════
+
+export class TimeoutError extends Error {
+  constructor(message, timeout) {
+    super(message);
+    this.name = 'TimeoutError';
+    this.timeout = timeout;
+  }
+}
+
+function matchString(text, pattern) {
+  if (!text) return false;
+  if (pattern instanceof RegExp) return pattern.test(text);
+  return text.includes(String(pattern));
+}
+
+const INTERACTIVE_ROLES = new Set([
+  'button', 'checkbox', 'radiobutton', 'combobox',
+  'menuitem', 'menuitemcheckbox', 'menuitemradio',
+  'hyperlink', 'link', 'tab', 'treeitem',
+  'splitbutton', 'togglebutton', 'spinbutton',
+]);
+
+function isInteractiveRole(role) {
+  return INTERACTIVE_ROLES.has(role.toLowerCase());
+}
+
+function findElementByLabel(tree, label) {
+  if (!tree || !label) return null;
+  const lines = tree.split('\n');
+  const lowerLabel = label.toLowerCase();
+
+  // Prefer interactive elements
+  for (const line of lines) {
+    const m = line.match(/^\s*(\d+)\s+(\S+)\s+(.*)/);
+    if (!m) continue;
+    const [, idx, role, name] = m;
+    if (name.toLowerCase().includes(lowerLabel) && isInteractiveRole(role)) {
+      return parseInt(idx, 10);
+    }
+  }
+
+  // Fallback: any element with the label
+  for (const line of lines) {
+    const m = line.match(/^\s*(\d+)\s+(.*)/);
+    if (!m) continue;
+    const [, idx, rest] = m;
+    if (rest.toLowerCase().includes(lowerLabel)) {
+      return parseInt(idx, 10);
+    }
+  }
+  return null;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// §6  DEFAULT EXPORT (backward-compatible with cu.mjs)
 // ═══════════════════════════════════════════════════════════════════════════════
 
 const instance = new ComputerUse();
@@ -615,7 +848,11 @@ const CU = {
   discoverPipePath:    ComputerUse.discoverPipePath,
   with:                ComputerUse.with,
   session:             ComputerUse.session,
+  waitUntil:           (w, fn, o) => instance.waitUntil(w, fn, o),
+  detectDialog:        (w, r) => instance.detectDialog(w, r),
+  waitUntilWithDialog: (w, r, o) => instance.waitUntilWithDialog(w, r, o),
   ComputerUse,
+  TimeoutError,
 };
 export default CU;
 

@@ -175,6 +175,72 @@ const tree = await getTree('Settings');
 await clickInWindow('Settings', toggleIdx);
 ```
 
+## Wait & Dialog Detection
+
+### waitUntil — Poll until condition is met
+
+```javascript
+import { ComputerUse } from 'file:///<skill-root>/scripts/computer-use.mjs';
+const cu = await ComputerUse.session();
+
+// Wait for a dialog to appear
+const state = await cu.waitUntil(win, (s) => {
+  return s.accessibility?.tree?.includes('确认');
+}, { timeout: 10000, interval: 500, description: '确认对话框' });
+
+// Wait for window to finish loading
+await cu.waitUntil(win, (s) => {
+  return (s.accessibility?.document_text || '').length > 100;
+}, { timeout: 30000, description: '页面加载完成' });
+```
+
+Options: `{ timeout, interval, description, includeScreenshot, signal }`
+
+### detectDialog — Match rules against accessibility tree
+
+```javascript
+const match = await cu.detectDialog(win, [
+  {
+    id: 'file-overwrite',
+    match: { content: '是否覆盖' },
+    action: { type: 'click', label: '是' },
+  },
+  {
+    id: 'uac',
+    match: { title: '用户帐户控制' },
+    action: { type: 'report' },  // Don't auto-click, report to caller
+  },
+]);
+if (match) {
+  console.log(`Matched: ${match.rule.id}, element: ${match.elementIndex}`);
+}
+```
+
+Match conditions: `{ title, content, custom(state) }` — supports string substring and RegExp.
+Action types: `click` (find button by label), `press` (send key), `report` (return for caller), `ignore`.
+
+### waitUntilWithDialog — Wait + auto-handle
+
+```javascript
+const result = await cu.waitUntilWithDialog(win, [
+  {
+    id: 'overwrite',
+    match: { content: '是否覆盖' },
+    action: { type: 'click', label: '是' },
+  },
+], { timeout: 15000, description: '文件覆盖确认' });
+// Automatically clicked "是" when dialog appeared
+```
+
+### Convenience wrappers (desktop-helper.mjs)
+
+```javascript
+import { waitForWindow, detectDialogInWindow } from 'file:///<skill-root>/scripts/desktop-helper.mjs';
+
+await waitForWindow('Notepad', (s) => s.accessibility?.tree?.includes('Save'), { timeout: 5000 });
+const match = await detectDialogInWindow('MyApp', [{ id: 'x', match: { content: 'OK' }, action: { type: 'click', label: 'OK' } }]);
+```
+
 ## Error Handling
 
 The helpers include automatic retry (2 retries, 1s delay). For custom workflows:
