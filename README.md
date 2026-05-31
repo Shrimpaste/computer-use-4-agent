@@ -2,73 +2,133 @@
 
 > 把 codex-computer-use 的桌面操控能力泛化为 agent 普适 skill。
 
-## 安装
+## 一键安装
 
 ```bash
-# 方式一：直接复制
+# 方式一：git clone（推荐）
+git clone https://github.com/Shrimpaste/computer-use-4-agent.git ~/.claude/skills/computer-use
+
+# 方式二：直接复制
 cp -r computer-use-4-agent ~/.claude/skills/computer-use
-
-# 方式二：git clone
-git clone https://github.com/yourname/computer-use-4-agent.git ~/.claude/skills/computer-use
 ```
 
-### 前置条件
+**无需 Codex、无需任何前置 exe。** helper 已打包在 `bin/` 目录中，首次使用时自动启动。
 
-- Windows 10/11
-- Node.js >= 18
-- `codex-computer-use.exe` 运行中（随 Codex 桌面端安装）
+## 快速开始
 
-```powershell
-# 检查 helper 是否运行
-Get-Process codex-computer-use -ErrorAction SilentlyContinue
+### 作为 Claude Code Skill
+
+安装后直接使用 `/cu` 命令：
+
+```
+/cu list                           # 列出所有窗口
+/cu screenshot Notepad shot.png    # 截图
+/cu type Notepad "Hello"           # 输入文字
+/cu send QQ 我的手机 hello          # 发消息
+/cu file WeChat 文件传输助手 C:\x.xlsx  # 发文件
 ```
 
-## 快速使用
-
-### 发消息
+### 作为 Node.js 模块
 
 ```javascript
-import { sendChatMessage } from 'file:///~/.claude/skills/computer-use/scripts/chat-helper.mjs';
+import { sendChatMessage, sendChatFile } from 'file:///~/.claude/skills/computer-use/scripts/chat-helper.mjs';
+import { screenshotWindow, getWindowText } from 'file:///~/.claude/skills/computer-use/scripts/desktop-helper.mjs';
 
+// 发消息
 await sendChatMessage('QQ', '我的手机', 'hello');
-await sendChatMessage('WeChat', '文件传输助手', 'hi');
-await sendChatMessage('Steam', 'Shrimpaste', 'test');
-```
 
-### 发文件
+// 发文件
+await sendChatFile('WeChat', '文件传输助手', 'C:\\report.md');
 
-```javascript
-import { sendChatFile } from 'file:///~/.claude/skills/computer-use/scripts/chat-helper.mjs';
-
-await sendChatFile('QQ', '我的手机', 'C:\\report.md');
-await sendChatFile('WeChat', '文件传输助手', 'C:\\file.xlsx');
-```
-
-### 截图 / 读取 / 点击
-
-```javascript
-import { screenshotWindow, getWindowText, typeInWindow, pressInWindow } from 'file:///~/.claude/skills/computer-use/scripts/desktop-helper.mjs';
-
+// 截图
 await screenshotWindow('Notepad', 'output.png');
+
+// 读取窗口文本
 const text = await getWindowText('Notepad');
-await typeInWindow('Notepad', 'Hello World');
-await pressInWindow('NetEase Cloud Music', 'space');  // 播放/暂停
 ```
 
-### 等待 + 弹窗处理
+### 作为 CLI 工具
+
+```bash
+node ~/.claude/skills/computer-use/scripts/cu.mjs list
+node ~/.claude/skills/computer-use/scripts/cu.mjs screenshot Notepad
+node ~/.claude/skills/computer-use/scripts/cu.mjs send QQ 我的手机 hello
+```
+
+## 前置条件
+
+| 条件 | 说明 |
+|------|------|
+| Windows 10/11 | 仅支持 Windows |
+| Node.js >= 18 | 运行脚本需要 |
+| codex-computer-use.exe | **已打包在 bin/ 目录，自动启动** |
+
+### 验证安装
+
+```bash
+node ~/.claude/skills/computer-use/scripts/cu.mjs list
+# 应该输出当前所有窗口列表
+```
+
+## 让你的 Agent 连接此 Skill
+
+### 方式一：Claude Code（推荐）
+
+1. 将仓库克隆到 `~/.claude/skills/computer-use`
+2. 在对话中使用 `/cu` 命令，agent 会自动调用 skill
+
+### 方式二：任意 AI Agent
+
+在你的 agent 代码中导入模块：
 
 ```javascript
-import { ComputerUse } from 'file:///~/.claude/skills/computer-use/scripts/computer-use.mjs';
+// 1. 导入核心库
+import { ComputerUse } from 'file:///path/to/computer-use/scripts/computer-use.mjs';
+
+// 2. 建立连接（自动发现 helper 管道）
 const cu = await ComputerUse.session();
 
-// 等待条件满足
-await cu.waitUntil(win, (s) => s.accessibility?.tree?.includes('确认'), { timeout: 10000 });
+// 3. 使用
+const wins = await cu.listWindows();
+await cu.activateWindow(wins[0]);
+const state = await cu.getWindowState(wins[0], { screenshot: true });
 
-// 检测并处理弹窗
-await cu.detectDialog(win, [
-  { id: 'overwrite', match: { content: '是否覆盖' }, action: { type: 'click', label: '是' } },
-  { id: 'uac', match: { title: '用户帐户控制' }, action: { type: 'report' } },
-]);
+// 4. 关闭
+await cu.close();
+```
+
+### 方式三：CLI 集成
+
+你的 agent 可以通过 shell 调用 CLI：
+
+```bash
+# 列出窗口
+node /path/to/cu.mjs list
+
+# 截图
+node /path/to/cu.mjs screenshot Notepad output.png
+
+# 发消息
+node /path/to/cu.mjs send QQ contact "hello"
+
+# 发文件
+node /path/to/cu.mjs file WeChat contact "C:\file.md"
+```
+
+## 命令参考
+
+```
+/cu list                          列出所有窗口
+/cu apps                          列出所有应用
+/cu screenshot <query> [path]     截图
+/cu text <query>                  读取窗口文本
+/cu type <query> <text>           输入文字
+/cu key <query> <key>             按键
+/cu click <query> <index>         点击元素
+/cu send <app> <contact> <msg>    发消息
+/cu file <app> <contact> <path>   发文件
+/cu open <app>                    启动应用
+/cu wait <query> <condition>      等待条件
 ```
 
 ## 支持的应用
@@ -80,69 +140,15 @@ await cu.detectDialog(win, [
 | Steam | ✅ | — | ✅ | ✅ | ✅ |
 | 任意应用 | — | — | ✅ | ✅ | ✅ |
 
-## 模块说明
-
-| 模块 | 职责 |
-|------|------|
-| `computer-use.mjs` | 核心库：窗口管理、无障碍树、截图、waitUntil、detectDialog |
-| `chat-helper.mjs` | 聊天软件：消息发送、文件传输（QQ/Steam/WeChat） |
-| `desktop-helper.mjs` | 通用自动化：截图、输入、按键、点击、读取文本 |
-
-## 设计理念
-
-### 泛化目标
-
-codex-computer-use 的原始接口面向单一应用（Codex CLI）。本插件将其泛化为**任何 agent 可调用的桌面操控 skill**：
-
-- **统一接口** — `sendChatMessage('QQ', 'contact', 'msg')` 一行代码完成
-- **应用无关** — 同一套 API 操控 QQ、WeChat、Steam、记事本、Excel...
-- **组合式** — 原语可任意组合：搜索→截图→分析→发送
-
-### 技术决策
-
-| 决策 | 理由 |
-|------|------|
-| 剪贴板粘贴替代 typeText | TextInputHost.exe 拦截键盘输入 |
-| 坐标点击替代无障碍树 | WeChat 等应用无障碍树极简 |
-| DPI 自适应 | 不同分辨率屏幕坐标自动缩放 |
-| 重试机制 | Helper 进程不稳定，自动恢复 |
-| PS1 脚本设置剪贴板 | Bash shell 吃掉反斜杠 |
-
 ## 已知局限
 
-**诚实地说，这个插件基于 codex-computer-use.exe，存在以下根本性限制：**
-
-| 问题 | 影响 | 规避方式 |
-|------|------|---------|
-| Helper 进程不稳定 | 操作中途可能崩溃 | 重试机制自动恢复 |
-| 元素索引变化 | UI 更新后索引失效 | 每次操作前重新获取 state |
-| 文件对话框难交互 | 独立窗口，坐标偏移 | 用剪贴板粘贴替代 |
-| 部分应用无无障碍树 | QQ 输入框、WeChat 内容 | 用坐标点击替代 |
-| 截图不含覆盖层 | "Agent is using..." 不在截图中 | 这是设计如此（安全特性） |
-| 不支持浏览器 | URL 策略拦截 | 用 kimi-webbridge 替代 |
-
-**核心瓶颈是 codex-computer-use.exe 的稳定性。** 所有上层优化都是在绕过它的缺陷。如果需要更可靠的桌面自动化，建议评估 pywinauto 或 AutoIt 方案。
-
-## 架构
-
-```
-computer-use-4-agent/
-├── SKILL.md              # Claude Code skill 定义
-├── scripts/
-│   ├── computer-use.mjs  # 核心库（named pipe IPC）
-│   ├── chat-helper.mjs   # 聊天软件工作流
-│   └── desktop-helper.mjs # 通用自动化
-├── README.md
-├── LICENSE               # MIT
-└── package.json
-```
-
-## 工作原理
-
-1. `computer-use.mjs` 通过 Windows named pipe 与 `codex-computer-use.exe` 通信（JSON-RPC 2.0）
-2. Helper 进程使用 UI Automation 和 SendInput 控制桌面
-3. `chat-helper.mjs` 增加剪贴板粘贴（绕过 TextInputHost.exe）和应用特定工作流
-4. `desktop-helper.mjs` 提供可组合的自动化构建块
+| 问题 | 说明 |
+|------|------|
+| Helper 进程不稳定 | 重试机制自动恢复 |
+| 元素索引变化 | 每次操作前重新获取 state |
+| 文件对话框难交互 | 用剪贴板粘贴替代 |
+| 部分应用无无障碍树 | 用坐标点击替代 |
+| 不支持浏览器 | 用 kimi-webbridge 替代 |
 
 ## License
 

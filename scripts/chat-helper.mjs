@@ -256,15 +256,6 @@ export async function sendChatMessage(app, contact, message) {
 }
 
 
-// ─── File Sending ────────────────────────────────────────────────────
-
-/**
- * Send a file via a chat app's file transfer feature.
- * @param {string} app - 'QQ', 'Steam', 'WeChat'
- * @param {string} contact - Contact name (e.g. '文件传输助手')
- * @param {string} filePath - Absolute path to the file
- * @returns {Promise<boolean>}
- */
 export function listSupportedApps() {
   return Object.keys(PROFILES);
 }
@@ -301,10 +292,11 @@ export async function sendChatFile(app, contact, filePath) {
 
         // Write PS1 script to copy file to clipboard
         const ps1Path = process.env.TEMP + "\\cu-copy-file.ps1";
+        const safePath = filePath.replace(/"/g, '`"');
         const ps1Content = [
           "Add-Type -AssemblyName System.Windows.Forms",
           "$f = New-Object System.Collections.Specialized.StringCollection",
-          "$f.Add(\"" + filePath + "\")",
+          "$f.Add(\"" + safePath + "\")",
           "[System.Windows.Forms.Clipboard]::SetFileDropList($f)"
         ].join("\n");
         writeFileSync(ps1Path, ps1Content, "utf8");

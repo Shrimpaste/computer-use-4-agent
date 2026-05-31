@@ -12,7 +12,8 @@
 import { ComputerUse } from './computer-use.mjs';
 import { sendChatMessage, sendChatFile } from './chat-helper.mjs';
 import { screenshotWindow, getWindowText, typeInWindow, pressInWindow, listWindows } from './desktop-helper.mjs';
-import { execSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import { resolve } from 'node:path';
 
 const [,, cmd, ...args] = process.argv;
 
@@ -73,7 +74,9 @@ async function main() {
     case 'file': {
       const [app, contact, filePath] = args;
       if (!app || !contact || !filePath) { console.error('Usage: cu file <app> <contact> <path>'); process.exit(1); }
-      await sendChatFile(app, contact, filePath);
+      const absPath = resolve(filePath);
+      if (!existsSync(absPath)) { console.error(`File not found: ${absPath}`); process.exit(1); }
+      await sendChatFile(app, contact, absPath);
       console.log(`File sent to ${contact} on ${app}`);
       break;
     }
@@ -94,18 +97,25 @@ async function main() {
     case 'wait': {
       const query = args[0];
       const condition = args[1];
-      const timeoutMatch = args.find(a => a.startsWith('--timeout'));
-      const timeout = timeoutMatch ? parseInt(args[args.indexOf(timeoutMatch) + 1]) || 30000 : 30000;
+      let timeout = 30000;
+      for (let i = 0; i < args.length; i++) {
+        if (args[i] === '--timeout' && i + 1 < args.length) {
+          timeout = parseInt(args[i + 1], 10);
+          if (isNaN(timeout) || timeout <= 0) { console.error('Invalid --timeout value'); process.exit(1); }
+          break;
+        }
+      }
       if (!query || !condition) { console.error('Usage: cu wait <query> <condition> [--timeout ms]'); process.exit(1); }
       const cu = await ComputerUse.session();
       try {
         const wins = await cu.listWindows();
         const win = ComputerUse.findWindow(wins, query);
         if (!win) throw new Error(`Window "${query}" not found`);
+        const lowerCondition = condition.toLowerCase();
         await cu.waitUntil(win, (s) => {
-          const tree = s.accessibility?.tree || '';
-          const text = s.accessibility?.document_text || '';
-          return tree.includes(condition) || text.includes(condition);
+          const tree = (s.accessibility?.tree || '').toLowerCase();
+          const text = (s.accessibility?.document_text || '').toLowerCase();
+          return tree.includes(lowerCondition) || text.includes(lowerCondition);
         }, { timeout, description: condition });
         console.log(`Condition met: "${condition}"`);
       } finally {

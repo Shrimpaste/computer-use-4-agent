@@ -4,13 +4,16 @@
   "description": "Windows desktop automation for AI agents",
   "type": "module",
   "main": "scripts/computer-use.mjs",
+  "bin": {
+    "cu": "./scripts/cu.mjs"
+  },
   "exports": {
     ".": "./scripts/computer-use.mjs",
     "./chat": "./scripts/chat-helper.mjs",
     "./desktop": "./scripts/desktop-helper.mjs"
   },
   "scripts": {
-    "test": "node --check scripts/computer-use.mjs && node --check scripts/chat-helper.mjs && node --check scripts/desktop-helper.mjs"
+    "test": "node --check scripts/computer-use.mjs && node --check scripts/chat-helper.mjs && node --check scripts/desktop-helper.mjs && node --check scripts/cu.mjs"
   },
   "keywords": ["windows", "desktop", "automation", "computer-use", "ai-agent"],
   "license": "MIT",
